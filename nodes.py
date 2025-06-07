@@ -246,6 +246,9 @@ class ConditioningZeroOut:
             pooled_output = d.get("pooled_output", None)
             if pooled_output is not None:
                 d["pooled_output"] = torch.zeros_like(pooled_output)
+            conditioning_lyrics = d.get("conditioning_lyrics", None)
+            if conditioning_lyrics is not None:
+                d["conditioning_lyrics"] = torch.zeros_like(conditioning_lyrics)
             n = [torch.zeros_like(t[0]), d]
             c.append(n)
         return (c, )
@@ -917,7 +920,7 @@ class CLIPLoader:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "clip_name": (folder_paths.get_filename_list("text_encoders"), ),
-                              "type": (["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan"], ),
+                              "type": (["stable_diffusion", "stable_cascade", "sd3", "stable_audio", "mochi", "ltxv", "pixart", "cosmos", "lumina2", "wan", "hidream", "chroma", "ace"], ),
                               },
                 "optional": {
                               "device": (["default", "cpu"], {"advanced": True}),
@@ -927,29 +930,10 @@ class CLIPLoader:
 
     CATEGORY = "advanced/loaders"
 
-    DESCRIPTION = "[Recipes]\n\nstable_diffusion: clip-l\nstable_cascade: clip-g\nsd3: t5 xxl/ clip-g / clip-l\nstable_audio: t5 base\nmochi: t5 xxl\ncosmos: old t5 xxl\nlumina2: gemma 2 2B\nwan: umt5 xxl"
+    DESCRIPTION = "[Recipes]\n\nstable_diffusion: clip-l\nstable_cascade: clip-g\nsd3: t5 xxl/ clip-g / clip-l\nstable_audio: t5 base\nmochi: t5 xxl\ncosmos: old t5 xxl\nlumina2: gemma 2 2B\nwan: umt5 xxl\n hidream: llama-3.1 (Recommend) or t5"
 
     def load_clip(self, clip_name, type="stable_diffusion", device="default"):
-        if type == "stable_cascade":
-            clip_type = comfy.sd.CLIPType.STABLE_CASCADE
-        elif type == "sd3":
-            clip_type = comfy.sd.CLIPType.SD3
-        elif type == "stable_audio":
-            clip_type = comfy.sd.CLIPType.STABLE_AUDIO
-        elif type == "mochi":
-            clip_type = comfy.sd.CLIPType.MOCHI
-        elif type == "ltxv":
-            clip_type = comfy.sd.CLIPType.LTXV
-        elif type == "pixart":
-            clip_type = comfy.sd.CLIPType.PIXART
-        elif type == "cosmos":
-            clip_type = comfy.sd.CLIPType.COSMOS
-        elif type == "lumina2":
-            clip_type = comfy.sd.CLIPType.LUMINA2
-        elif type == "wan":
-            clip_type = comfy.sd.CLIPType.WAN
-        else:
-            clip_type = comfy.sd.CLIPType.STABLE_DIFFUSION
+        clip_type = getattr(comfy.sd.CLIPType, type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
 
         model_options = {}
         if device == "cpu":
@@ -964,7 +948,7 @@ class DualCLIPLoader:
     def INPUT_TYPES(s):
         return {"required": { "clip_name1": (folder_paths.get_filename_list("text_encoders"), ),
                               "clip_name2": (folder_paths.get_filename_list("text_encoders"), ),
-                              "type": (["sdxl", "sd3", "flux", "hunyuan_video"], ),
+                              "type": (["sdxl", "sd3", "flux", "hunyuan_video", "hidream"], ),
                               },
                 "optional": {
                               "device": (["default", "cpu"], {"advanced": True}),
@@ -974,19 +958,13 @@ class DualCLIPLoader:
 
     CATEGORY = "advanced/loaders"
 
-    DESCRIPTION = "[Recipes]\n\nsdxl: clip-l, clip-g\nsd3: clip-l, clip-g / clip-l, t5 / clip-g, t5\nflux: clip-l, t5"
+    DESCRIPTION = "[Recipes]\n\nsdxl: clip-l, clip-g\nsd3: clip-l, clip-g / clip-l, t5 / clip-g, t5\nflux: clip-l, t5\nhidream: at least one of t5 or llama, recommended t5 and llama"
 
     def load_clip(self, clip_name1, clip_name2, type, device="default"):
+        clip_type = getattr(comfy.sd.CLIPType, type.upper(), comfy.sd.CLIPType.STABLE_DIFFUSION)
+
         clip_path1 = folder_paths.get_full_path_or_raise("text_encoders", clip_name1)
         clip_path2 = folder_paths.get_full_path_or_raise("text_encoders", clip_name2)
-        if type == "sdxl":
-            clip_type = comfy.sd.CLIPType.STABLE_DIFFUSION
-        elif type == "sd3":
-            clip_type = comfy.sd.CLIPType.SD3
-        elif type == "flux":
-            clip_type = comfy.sd.CLIPType.FLUX
-        elif type == "hunyuan_video":
-            clip_type = comfy.sd.CLIPType.HUNYUAN_VIDEO
 
         model_options = {}
         if device == "cpu":
@@ -1125,16 +1103,7 @@ class unCLIPConditioning:
         if strength == 0:
             return (conditioning, )
 
-        c = []
-        for t in conditioning:
-            o = t[1].copy()
-            x = {"clip_vision_output": clip_vision_output, "strength": strength, "noise_augmentation": noise_augmentation}
-            if "unclip_conditioning" in o:
-                o["unclip_conditioning"] = o["unclip_conditioning"][:] + [x]
-            else:
-                o["unclip_conditioning"] = [x]
-            n = [t[0], o]
-            c.append(n)
+        c = node_helpers.conditioning_set_values(conditioning, {"unclip_conditioning": [{"clip_vision_output": clip_vision_output, "strength": strength, "noise_augmentation": noise_augmentation}]}, append=True)
         return (c, )
 
 class GLIGENLoader:
@@ -1962,7 +1931,7 @@ class ImagePadForOutpaint:
 
         mask[top:top + d2, left:left + d3] = t
 
-        return (new_image, mask)
+        return (new_image, mask.unsqueeze(0))
 
 
 NODE_CLASS_MAPPINGS = {
@@ -2092,11 +2061,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImagePadForOutpaint": "Pad Image for Outpainting",
     "ImageBatch": "Batch Images",
     "ImageCrop": "Image Crop",
+    "ImageStitch": "Image Stitch",
     "ImageBlend": "Image Blend",
     "ImageBlur": "Image Blur",
     "ImageQuantize": "Image Quantize",
     "ImageSharpen": "Image Sharpen",
     "ImageScaleToTotalPixels": "Scale Image to Total Pixels",
+    "GetImageSize": "Get Image Size",
     # _for_testing
     "VAEDecodeTiled": "VAE Decode (Tiled)",
     "VAEEncodeTiled": "VAE Encode (Tiled)",
@@ -2281,7 +2252,13 @@ def init_builtin_extra_nodes():
         "nodes_primitive.py",
         "nodes_cfg.py",
         "nodes_optimalsteps.py",
-        "nodes_hidream.py"
+        "nodes_hidream.py",
+        "nodes_fresca.py",
+        "nodes_apg.py",
+        "nodes_preview_any.py",
+        "nodes_ace.py",
+        "nodes_string.py",
+        "nodes_camera_trajectory.py",
     ]
 
     import_failed = []
@@ -2292,13 +2269,59 @@ def init_builtin_extra_nodes():
     return import_failed
 
 
-def init_extra_nodes(init_custom_nodes=True):
+def init_builtin_api_nodes():
+    api_nodes_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "comfy_api_nodes")
+    api_nodes_files = [
+        "nodes_ideogram.py",
+        "nodes_openai.py",
+        "nodes_minimax.py",
+        "nodes_veo2.py",
+        "nodes_kling.py",
+        "nodes_bfl.py",
+        "nodes_luma.py",
+        "nodes_recraft.py",
+        "nodes_pixverse.py",
+        "nodes_stability.py",
+        "nodes_pika.py",
+        "nodes_runway.py",
+        "nodes_tripo.py",
+        "nodes_rodin.py",
+        "nodes_gemini.py",
+    ]
+
+    if not load_custom_node(os.path.join(api_nodes_dir, "canary.py"), module_parent="comfy_api_nodes"):
+        return api_nodes_files
+
+    import_failed = []
+    for node_file in api_nodes_files:
+        if not load_custom_node(os.path.join(api_nodes_dir, node_file), module_parent="comfy_api_nodes"):
+            import_failed.append(node_file)
+
+    return import_failed
+
+
+def init_extra_nodes(init_custom_nodes=True, init_api_nodes=True):
     import_failed = init_builtin_extra_nodes()
+
+    import_failed_api = []
+    if init_api_nodes:
+        import_failed_api = init_builtin_api_nodes()
 
     if init_custom_nodes:
         init_external_custom_nodes()
     else:
         logging.info("Skipping loading of custom nodes")
+
+    if len(import_failed_api) > 0:
+        logging.warning("WARNING: some comfy_api_nodes/ nodes did not import correctly. This may be because they are missing some dependencies.\n")
+        for node in import_failed_api:
+            logging.warning("IMPORT FAILED: {}".format(node))
+        logging.warning("\nThis issue might be caused by new missing dependencies added the last time you updated ComfyUI.")
+        if args.windows_standalone_build:
+            logging.warning("Please run the update script: update/update_comfyui.bat")
+        else:
+            logging.warning("Please do a: pip install -r requirements.txt")
+        logging.warning("")
 
     if len(import_failed) > 0:
         logging.warning("WARNING: some comfy_extras/ nodes did not import correctly. This may be because they are missing some dependencies.\n")

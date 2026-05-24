@@ -1,7 +1,9 @@
+PY = ../python_embeded/python.exe
+
 up:
-	python3 main.py
+	$(PY) main.py --enable-manager > log.txt 2>&1
 pip:
-	pip3 install -r requirements.txt
+	$(PY) -m pip install -r requirements.txt
 styles:
-	python3 convert_styles.py
+	$(PY) convert_styles.py
 	cp styles.json custom_nodes/comfyui-easy-use/styles/styles.json
